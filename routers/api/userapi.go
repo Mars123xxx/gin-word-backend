@@ -2,10 +2,11 @@ package api
 
 import (
 	"awesomeProject/global"
+	"database/sql"
 	"encoding/json"
 	"github.com/gin-gonic/gin"
-	"log"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -140,12 +141,12 @@ func goStudy(c *gin.Context) {
 			// 创建一个新的映射，用于存储反序列化后的JSON字符串,批量反序列化
 			deserializedMapping := make(map[string]interface{})
 
-			// 遍历映射，并序列化每个值
+			// 遍历映射，并反序列化每个值
 			for k, v := range theFirstOne {
 				var obj interface{}
 				err := json.Unmarshal([]byte(v), &obj)
 				if err != nil {
-					log.Fatalf("JSON marshaling failed for key '%s': %s", k, err)
+					return
 				}
 				deserializedMapping[k] = obj
 			}
@@ -155,8 +156,97 @@ func goStudy(c *gin.Context) {
 			c.JSONP(200, deserializedMapping)
 			return
 		} else {
+			var wordIDList []int
 			//没有缓存时加载缓存到redis中
-			//TODO
+			rows, err := db.Raw("SELECT `id` FROM word WHERE NOT EXISTS(SELECT * FROM study_log where study_log.word_id = word.id and study_log.user_id = ? )", userId).Rows()
+			if err != nil {
+				return
+			}
+			defer func(rows *sql.Rows) {
+				err := rows.Close()
+				if err != nil {
+					return
+				}
+			}(rows)
+			for rows.Next() {
+				var id int
+				if err := rows.Scan(&id); err != nil {
+					return
+				}
+				wordIDList = append(wordIDList, id)
+			}
+			if len(wordIDList) == 0 {
+				c.JSON(200, gin.H{
+					"msg": "暂无待学习的单词",
+				})
+				return
+			}
+			var idData []int
+			if len(wordIDList) > user.Schedule {
+				idData = wordIDList[0:user.Schedule]
+			} else {
+				idData = wordIDList
+			}
+			var wg sync.WaitGroup
+			wg.Add(len(idData))
+			//通过协程优化，这里为108ms
+			for _, wid := range idData {
+				go func(wid int) {
+					defer wg.Done()
+					item, _ := GetWordDetailByID(wid)
+					rdb.LPush("study:"+userId, strconv.Itoa(wid))
+					mapping := map[string]interface{}{
+						"id":              item["id"],
+						"word":            item["word"],
+						"language":        item["language"],
+						"sentences":       item["sentences"],
+						"root_word":       item["root_word"],
+						"root_meaning":    item["root_meaning"],
+						"meanings":        item["meanings"],
+						"collocations":    item["collocations"],
+						"relative_words":  item["relative_words"],
+						"right_option":    item["right_option"],
+						"options":         item["options"],
+						"similar_options": item["similar_options"],
+						"times":           0,
+						"total_study":     len(idData),
+					}
+					for k, v := range mapping {
+						obj, err := json.Marshal(v)
+						if err != nil {
+							return
+						}
+						mapping[k] = obj
+					}
+					rdb.HMSet("study:"+userId+":"+strconv.Itoa(wid), mapping)
+				}(wid)
+			}
+			//等待所有协程执行完毕
+			wg.Wait()
+			theFirstOneId, err := rdb.LIndex("study:"+userId, 0).Result()
+			if err != nil {
+				return
+			}
+
+			//这里返回一个map字典map[string]string
+			theFirstOne, _ := rdb.HGetAll("study:" + userId + ":" + theFirstOneId).Result()
+			// 创建一个新的映射，用于存储反序列化后的JSON字符串,批量反序列化
+			deserializedMapping := make(map[string]interface{})
+
+			// 遍历映射，并反序列化每个值
+			for k, v := range theFirstOne {
+				var obj interface{}
+				err := json.Unmarshal([]byte(v), &obj)
+				if err != nil {
+					return
+				}
+				deserializedMapping[k] = obj
+			}
+			leftStudyCount, _ := rdb.LLen("study:" + userId).Result()
+			deserializedMapping["left_study"] = strconv.Itoa(int(leftStudyCount))
+			//返回一个对象
+			c.JSONP(200, deserializedMapping)
+			return
 		}
 	}
 	c.JSON(200, gin.H{
