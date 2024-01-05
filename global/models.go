@@ -85,5 +85,5 @@ type StudyLog struct {
 	WordID         uint      `gorm:"not null"`
 	StartStudyTime time.Time `gorm:"default:current_timestamp"`
 	StudyTimes     int       `gorm:"default:0"`
-	NextStudyTime  *time.Time
+	NextStudyTime  time.Time
 }

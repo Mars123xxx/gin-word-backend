@@ -254,10 +254,148 @@ func goStudy(c *gin.Context) {
 	})
 }
 
+func goReview(c *gin.Context) {
+	db := global.MySQLDB
+	rdb := global.RedisDB
+	currentUserId, exist := c.Get("userID")
+	userId := currentUserId.(string)
+	if exist {
+		user := global.User{}
+		db.First(&user, currentUserId)
+		result, err := rdb.Exists("review:" + userId).Result()
+		if err != nil {
+			println("redis错误")
+			return
+		}
+		if result != 0 {
+			theFirstOneId, err := rdb.LIndex("review:"+userId, 0).Result()
+			if err != nil {
+				return
+			}
+
+			//这里返回一个map字典map[string]string
+			theFirstOne, _ := rdb.HGetAll("review:" + userId + ":" + theFirstOneId).Result()
+			// 创建一个新的映射，用于存储反序列化后的JSON字符串,批量反序列化
+			deserializedMapping := make(map[string]interface{})
+
+			// 遍历映射，并反序列化每个值
+			for k, v := range theFirstOne {
+				var obj interface{}
+				err := json.Unmarshal([]byte(v), &obj)
+				if err != nil {
+					return
+				}
+				deserializedMapping[k] = obj
+			}
+			leftStudyCount, _ := rdb.LLen("review:" + userId).Result()
+			deserializedMapping["left_review"] = strconv.Itoa(int(leftStudyCount))
+			//返回一个对象
+			c.JSONP(200, deserializedMapping)
+			return
+		} else {
+			var wordIDList []int
+			//没有缓存时加载缓存到redis中
+			rows, err := db.Raw("SELECT word_id FROM study_log WHERE user_id = ? and next_study_time < ?", userId, time.Now()).Rows()
+			if err != nil {
+				return
+			}
+			defer func(rows *sql.Rows) {
+				err := rows.Close()
+				if err != nil {
+					return
+				}
+			}(rows)
+			for rows.Next() {
+				var id int
+				if err := rows.Scan(&id); err != nil {
+					return
+				}
+				wordIDList = append(wordIDList, id)
+			}
+			if len(wordIDList) == 0 {
+				c.JSON(200, gin.H{
+					"msg": "暂无待复习的单词",
+				})
+				return
+			}
+			var idData []int
+			if len(wordIDList) > user.Schedule {
+				idData = wordIDList[0:user.Schedule]
+			} else {
+				idData = wordIDList
+			}
+			var wg sync.WaitGroup
+			wg.Add(len(idData))
+			//通过协程优化，这里为108ms
+			for _, wid := range idData {
+				go func(wid int) {
+					defer wg.Done()
+					item, _ := GetWordDetailByID(wid)
+					rdb.LPush("review:"+userId, strconv.Itoa(wid))
+					mapping := map[string]interface{}{
+						"id":              item["id"],
+						"word":            item["word"],
+						"language":        item["language"],
+						"sentences":       item["sentences"],
+						"root_word":       item["root_word"],
+						"root_meaning":    item["root_meaning"],
+						"meanings":        item["meanings"],
+						"collocations":    item["collocations"],
+						"relative_words":  item["relative_words"],
+						"right_option":    item["right_option"],
+						"options":         item["options"],
+						"similar_options": item["similar_options"],
+						"times":           1,
+						"total_review":    len(idData),
+					}
+					for k, v := range mapping {
+						obj, err := json.Marshal(v)
+						if err != nil {
+							return
+						}
+						mapping[k] = obj
+					}
+					rdb.HMSet("review:"+userId+":"+strconv.Itoa(wid), mapping)
+				}(wid)
+			}
+			//等待所有协程执行完毕
+			wg.Wait()
+			theFirstOneId, err := rdb.LIndex("review:"+userId, 0).Result()
+			if err != nil {
+				return
+			}
+
+			//这里返回一个map字典map[string]string
+			theFirstOne, _ := rdb.HGetAll("review:" + userId + ":" + theFirstOneId).Result()
+			// 创建一个新的映射，用于存储反序列化后的JSON字符串,批量反序列化
+			deserializedMapping := make(map[string]interface{})
+
+			// 遍历映射，并反序列化每个值
+			for k, v := range theFirstOne {
+				var obj interface{}
+				err := json.Unmarshal([]byte(v), &obj)
+				if err != nil {
+					return
+				}
+				deserializedMapping[k] = obj
+			}
+			leftStudyCount, _ := rdb.LLen("review:" + userId).Result()
+			deserializedMapping["left_review"] = strconv.Itoa(int(leftStudyCount))
+			//返回一个对象
+			c.JSONP(200, deserializedMapping)
+			return
+		}
+	}
+	c.JSON(200, gin.H{
+		"status": "error",
+	})
+}
+
 func SetupUserRouter(userGroup *gin.RouterGroup) {
 	userGroup.GET("/", userIndex)
 	userGroup.POST("/baseInfo", baseInfo)
 	userGroup.POST("/studyInfo", studyInfo)
 	userGroup.POST("/schedule", changeSchedule)
 	userGroup.POST("/goStudy", goStudy)
+	userGroup.POST("/goReview", goReview)
 }
