@@ -7,6 +7,7 @@ import (
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/errors"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
 	sms "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/sms/v20210111" // 引入sms
+	"os"
 	"regexp"
 	"strconv"
 )
@@ -27,10 +28,10 @@ func SendSms(phoneNum string, verifyCode int) {
 	 * 以免泄露密钥对危及您的财产安全。
 	 * SecretId、SecretKey 查询: https://console.cloud.tencent.com/cam/capi */
 	credential := common.NewCredential(
-		// os.Getenv("TENCENTCLOUD_SECRET_ID"),
-		// os.Getenv("TENCENTCLOUD_SECRET_KEY"),
-		"AKIDeAWeZO0OemkU6Ypm6Qbs4jJXdesBHAuW",
-		"Zu77uSnunHo91hAXmy28B3kOtAIWtIfu",
+		os.Getenv("TENCENTCLOUD_SECRET_ID"),
+		os.Getenv("TENCENTCLOUD_SECRET_KEY"),
+		//"AKIDeAWeZO0OemkU6Ypm6Qbs4jJXdesBHAuW",
+		//"Zu77uSnunHo91hAXmy28B3kOtAIWtIfu",
 	)
 	/* 非必要步骤:
 	 * 实例化一个客户端配置对象，可以指定超时时间等配置 */
