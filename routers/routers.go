@@ -10,12 +10,13 @@ import (
 	"gorm.io/gorm"
 	"math/rand"
 	"strings"
+	"sync"
 	"time"
 )
 
 type SetupAPIRouterFunc func(*gin.RouterGroup)
 
-func SetupRouter(c *gin.Engine) {
+func SetupRouter(c *gin.RouterGroup) {
 	apiRouter := c.Group("/api")
 	SetupAPIRouter(apiRouter)
 	//获取验证码
@@ -51,7 +52,10 @@ func apiIndexHandler(c *gin.Context) {
 
 func verifyCodeHandler(c *gin.Context) {
 	redisDB := global.RedisDB
-	phoneNum := c.Query("phone_number")
+	phoneNum, ok := c.GetQuery("phone_number")
+	if !ok {
+		return
+	}
 	exist, err := redisDB.Exists("verify_code:" + phoneNum).Result()
 	if err != nil {
 		println("查询Redis出错：", err)
@@ -65,18 +69,31 @@ func verifyCodeHandler(c *gin.Context) {
 		return
 	} else {
 		if utils.IsValidChinaMobile(phoneNum) {
+			var wg sync.WaitGroup
 			rand.Seed(time.Now().UnixNano())
+			wg.Add(1)
 			code := rand.Intn(8888) + 1111
-			_, err := redisDB.Set("verify_code:"+phoneNum, code, 60).Result()
+			go func(wg *sync.WaitGroup) {
+				defer wg.Done()
+				utils.SendSms(phoneNum, code)
+			}(&wg)
+			_, err := redisDB.Set("verify_code:"+phoneNum, code, time.Minute*5).Result()
+
 			if err != nil {
 				println("Redis插入错误", err)
 				c.JSON(200, gin.H{"error": err})
 				return
 			}
+			wg.Wait()
 			c.JSON(200, gin.H{
 				"status": "success",
 			})
+			return
 		}
+		c.JSON(200, gin.H{
+			"status": "error",
+			"msg":    "手机号格式错误",
+		})
 	}
 }
 

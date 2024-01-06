@@ -64,7 +64,7 @@ func CreateAccessToken(userId uint) (string, error) {
 	// 创建一个新的Token对象，指定签名方法和claims
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"user_id": strconv.FormatUint(uint64(userId), 10),
-		"exp":     time.Now().Add(time.Hour * 72).Unix(), // Token有效期72小时
+		"exp":     time.Now().Add(time.Hour * 24 * 7).Unix(), // Token有效期72小时
 	})
 
 	// 使用密钥签名Token
