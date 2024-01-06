@@ -30,8 +30,6 @@ func SendSms(phoneNum string, verifyCode int) {
 	credential := common.NewCredential(
 		os.Getenv("TENCENTCLOUD_SECRET_ID"),
 		os.Getenv("TENCENTCLOUD_SECRET_KEY"),
-		//"AKIDeAWeZO0OemkU6Ypm6Qbs4jJXdesBHAuW",
-		//"Zu77uSnunHo91hAXmy28B3kOtAIWtIfu",
 	)
 	/* 非必要步骤:
 	 * 实例化一个客户端配置对象，可以指定超时时间等配置 */
